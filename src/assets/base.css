@@ -1,0 +1,94 @@
+/* Resets básicos para asegurar consistencia entre navegadores */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Fuente base */
+  line-height: 1.5;
+  color: #333;
+  background-color: #f4f4f4; /* Un fondo claro para toda la página */
+  -webkit-font-smoothing: antialiased; /* Mejora el renderizado de fuentes en navegadores webkit */
+  -moz-osx-font-smoothing: grayscale; /* Mejora el renderizado de fuentes en Firefox */
+}
+
+/* Estilos para el contenedor principal de la aplicación */
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh; /* Asegura que ocupe al menos toda la altura de la ventana */
+}
+
+/* Estilos para la navegación (puedes ajustarlos según tu diseño) */
+nav {
+  background-color: #eee;
+  padding: 20px;
+  text-align: center;
+  border-bottom: 1px solid #ddd;
+}
+
+nav a {
+  font-weight: bold;
+  color: #2c3e50;
+  text-decoration: none;
+  margin: 0 15px;
+  transition: color 0.3s ease;
+}
+
+nav a:hover {
+  color: #42b983;
+}
+
+nav a.router-link-active {
+  color: #42b983;
+}
+
+/* Estilos generales para títulos */
+h1,
+h2,
+h3 {
+  color: #333;
+  line-height: 1.2;
+  margin-bottom: 1rem;
+}
+
+h1 {
+  font-size: 2.5em;
+}
+
+h2 {
+  font-size: 2em;
+}
+
+h3 {
+  font-size: 1.5em;
+}
+
+/* Estilos generales para párrafos */
+p {
+  margin-bottom: 1em;
+  color: #555;
+}
+
+/* Estilos para enlaces fuera de la navegación */
+a {
+  color: #007bff;
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+a:hover {
+  color: #0056b3;
+  text-decoration: underline;
+}
+
+/* Puedes añadir más estilos globales aquí según necesites para botones, formularios, etc. */
