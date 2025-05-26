@@ -5,23 +5,31 @@
     <div class="search-filters">
       <input type="text" v-model="searchMac" placeholder="Buscar por MAC">
       <input type="text" v-model="searchSede" placeholder="Buscar por Sede">
-      <input type="checkbox" v-model="mostrarSoloNoCoincidentes" id="no-coincidentes" @change="cargarLogsConAutorizacion" >
-        <label for="no-coincidentes">Mostrar Logs No Coincidentes</label>
-      </div>
+      <!--<input type="checkbox" v-model="mostrarSoloNoCoincidentes" id="no-coincidentes">
+       <label for="no-coincidentes">Mostrar Logs No Coincidentes</label>-->
+    </div>
     <div class="actions">
       <h3>Importar Datos desde archivo</h3>
       <input class="search-filters" type="file" accept=".csv, .txt" @change="handleFileUpload">
       <button @click="uploadFile" :disabled="!selectedFile || uploading">
-        {{ uploading ? 'Subiendo...' : 'Subir Archivo CSV' }}
+        {{ uploading ? 'Subiendo...' : 'Subir Archivo                                 ' }}
       </button>
-      <p v-if="uploadProgress > 0">Progreso: {{ uploadProgress }}%</p>
-      <p v-if="uploadSuccess" class="text-green-500 mt-2">Archivo CSV subido y procesado correctamente.</p>
-      <p v-if="uploadNoContent" class="text-yellow-500 mt-2">Archivo CSV recibido, pero no se encontraron datos válidos.</p>
-      <p v-if="uploadError" class="text-red-500 mt-2">Error al subir el archivo: {{ uploadError }}</p>
+      <div v-if="uploading">
+        <p>Progreso: {{ uploadProgress }}%</p>
+        <p v-if="processingMessage">{{ processingMessage }}</p>
+      </div>
+      <p v-if="uploadSuccess && !uploadError">✅ ¡Archivo cargado con éxito!</p>
+      <p v-if="uploadNoContent">ℹ️ El archivo está vacío o no contiene datos válidos.</p>
+      <p v-if="uploadError" class="error">❌ Error: {{ uploadError }}</p>
+
+    </div>
+    <div class ="actions">
+      <button @click="borrarLogsSeleccionados">Borrar Seleccionados</button>
     </div>
     <table class="mi-tabla" v-if="logs && logs.length">
       <thead>
       <tr>
+        <th><input type="checkbox" :checked="todosSeleccionados" @change="seleccionarTodos"/></th>
         <th>ID</th>
         <th>Directorio</th>
         <th>Hostname</th>
@@ -32,35 +40,39 @@
         <th>Sede</th>
         <th>Timestamp</th>
         <th>Vlan</th>
+        <th>Acciones</th>
       </tr>
       </thead>
       <tbody>
-        <tr v-for="log in logs" :key="log.id">
-          <td>{{ log.id }}</td>
-          <td>{{ log.directorio }}</td>
-          <td>{{ log.hostname }}</td>
-          <td>{{ log.ip }}</td>
-          <td>{{ log.ipSwitch }}</td>
-          <td>{{ log.macAddress }}</td>
-          <td>{{ log.puerto }}</td>
-          <td>{{ log.sede }}</td>
-          <td>{{ log.timestamp }}</td>
-          <td>{{ log.vlan }}</td>
-          <td>
-            <button @click="goToGuardarDispositivo(log.macAddress, log.sede)">
-              Guardar Dispositivo
-            </button>
-          </td>
-        </tr>
+      <tr v-for="log in logs" :key="log.id">
+        <td>
+          <input type="checkbox" :value="log.id" v-model="logsSeleccionados"/>
+        </td>
+        <td>{{ log.id }}</td>
+        <td>{{ log.directorio }}</td>
+        <td>{{ log.hostname }}</td>
+        <td>{{ log.ip }}</td>
+        <td>{{ log.ipSwitch }}</td>
+        <td>{{ log.macAddress }}</td>
+        <td>{{ log.puerto }}</td>
+        <td>{{ log.sede }}</td>
+        <td>{{ log.timestamp }}</td>
+        <td>{{ log.vlan }}</td>
+        <td>
+          <button @click="goToGuardarDispositivo(log)">
+            Guardar Dispositivo
+          </button>
+        </td>
+      </tr>
       </tbody>
     </table>
     <p v-else>No hay registros</p>
     <div class="actions">
-      <button @click="prevPage" :disabled="currentPage === 1" >Anterior</button>
-      <label>Página {{ currentPage }} de {{ totalPages}}</label>
-      <button @click="nextPage" :disabled="currentPage === totalPages" >Siguiente</button>
+      <button @click="prevPage" :disabled="currentPage === 1">Anterior</button>
+      <label>Página {{ currentPage }} de {{ totalPages }}</label>
+      <button @click="nextPage" :disabled="currentPage === totalPages">Siguiente</button>
 
-    </div >
+    </div>
     <div class="search-filters">
       <label>Ir a la página: </label>
       <input
@@ -70,169 +82,265 @@
           :max="totalPages"
           @keydown.enter="goToPage"
       >
-      <button  @click="goToPage" >Ir</button>
+      <button @click="goToPage">Ir</button>
     </div>
     <div class="search-filters">
-      <select v-model.number="perPage" >
+      <select v-model.number="perPage">
         <option :value="5">5</option>
         <option :value="10">10</option>
         <option :value="20">20</option>
       </select>
       <span>por página</span>
     </div>
-    <p v-if="error" >Error: {{ error.message }}</p>
+    <p v-if="error">Error: {{ error.message }}</p>
   </div>
 </template>
 
 <script>
 import api from "@/api/api.js";
 import {useRouter} from 'vue-router';
+import { ref, watch, onMounted, computed } from 'vue';
+
 export default {
   name: 'LogsPage',
   setup() {
     const router = useRouter();
 
-    const goToGuardarDispositivo = (mac, sede) => {
+    const logs = ref([]);
+    const loading = ref(false);
+    const error = ref(null);
+    const currentPage = ref(1);
+    const perPage = ref(10);
+    const searchMac = ref('');
+    const searchSede = ref('');
+    const selectedFile = ref(null);
+    const uploading = ref(false);
+    const uploadProgress = ref(0);
+    const uploadSuccess = ref(false);
+    const uploadNoContent = ref(false);
+    const uploadError = ref(null);
+    const goToPageInput = ref(null);
+    const mostrarSoloNoCoincidentes = ref(false);
+    const totalPages = ref(1);
+    const logsSeleccionados = ref([]);
+    const processingMessage= ref('');
+
+
+    const todosSeleccionados = computed(() => {
+      // Si no hay logs, o si todos los logs están seleccionados
+      return logs.value.length > 0 && logsSeleccionados.value.length === logs.value.length;
+    });
+
+    const goToGuardarDispositivo = (log) => {
       router.push({
         name: 'NuevoDispositivo',
-        query: {mac: mac, sede: sede},
+        query: {
+          mac: log.macAddress,
+          sede: log.sede,
+          ip: log.ip,       // pasamos la IP
+          logId: log.id     // y también el ID del log
+        },
       });
     };
-    return {router, goToGuardarDispositivo};
-  },
-  data() {
-    return {
-      logs: [],
-      loading: false,
-      error: null,
-      currentPage: 1,
-      perPage: 10,
-      searchMac: '',
-      searchSede: '',
-      selectedFile: null,
-      uploading: false,
-      uploadProgress: 0,
-      uploadSuccess: false,
-      uploadNoContent: false,
-      uploadError: null,
-      goToPageInput: null,
-      mostrarSoloNoCoincidentes: false,
-      totalPages: 1,
-    };
-  },
-  mounted() {
-    this.fetchLogs();
-  },
-  watch: {
-    // Cuando cambian filtros o tamaño, recargar desde la página 1
-    searchMac:   'onFilterChange',
-    searchSede:  'onFilterChange',
-    mostrarSoloNoCoincidentes: 'onFilterChange',
-    perPage:     'onFilterChange',
-  },
 
-  methods: {
-    onFilterChange() {
-      this.currentPage = 1;
-      this.fetchLogs();
-      },
-    async fetchLogs() {
+    // Método para obtener los logs paginados desde el backend
+    const fetchLogs = async () => {
+      loading.value = true;
+      error.value = null;
 
-      this.loading = true;
-      this.error = null;
       const url = '/logs/paginated';
       const params = {
-        page: this.currentPage -1,
-        size: this.perPage,
-      ...(this.searchMac && {macAddress: this.searchMac}),
-        ...(this.searchSede && {sede: this.searchSede}),
-        ...(this.mostrarSoloNoCoincidentes && {noCoincidentes: true}),
+        page: currentPage.value - 1,
+        size: perPage.value,
+        ...(searchMac.value && {macAddress: searchMac.value}),
+        ...(searchSede.value && {sede: searchSede.value}),
+        ...(mostrarSoloNoCoincidentes.value && {noCoincidentes: true}),
       };
 
-
       try {
-        const {data} = await api.get(url,{params});
-        const { content, page } = data;
-        this.logs = content;
-        this.perPage = page.size;
-        this.totalPages = page.totalPages;
-        this.currentPage=page.number+1;
+        const {data} = await api.get(url, {params});
+        const {content, page} = data;
+        logs.value = content;
+        perPage.value = page.size;
+        totalPages.value = page.totalPages;
+        currentPage.value = page.number + 1;
       } catch (e) {
-        this.error = e;
-        console.error("Error al cargar logs (con autorización):", e);
+        error.value = e;
+        console.error("Error al cargar logs:", e);
+        // Aquí se usaría un toast de error
       } finally {
-        this.loading = false;
+        loading.value = false;
       }
-    },
-    prevPage() {
-      if (this.currentPage > 1) this.currentPage--;
-      this.fetchLogs();
-    },
-    nextPage() {
-      if (this.currentPage < this.totalPages) this.currentPage++;
-      this.fetchLogs();
-    },
-    handleFileUpload(event) {
-      this.selectedFile = event.target.files[0];
-      this.uploadSuccess = false;
-      this.uploadNoContent = false;
-      this.uploadError = null;
-      this.uploadProgress = 0;
-    },
-    goToPage() {
-      if (this.goToPageInput !== null && this.goToPageInput >= 1 && this.goToPageInput <= this.totalPages) {
-        this.currentPage = this.goToPageInput;
-        this.fetchLogs();
-        this.goToPageInput = null; // Limpiar el input después de ir a la página
-      } else if (this.goToPageInput !== null) {
-        alert(`Por favor, ingresa un número de página entre 1 y ${this.totalPages}.`);
-        this.goToPageInput = null; // Limpiar el input en caso de valor inválido
+    };
+
+    // Método llamado cuando cambian los filtros o el tamaño por página
+    const onFilterChange = () => {
+      currentPage.value = 1;
+      fetchLogs();
+    };
+
+    // Métodos para navegar por la paginación
+    const prevPage = () => {
+      if (currentPage.value > 1) {
+        currentPage.value--;
+        fetchLogs();
       }
-    },
-    async uploadFile() {
-      if (!this.selectedFile) {
-        alert('Por favor, selecciona un archivo CSV.');
+    };
+    const nextPage = () => {
+      if (currentPage.value < totalPages.value) {
+        currentPage.value++;
+        fetchLogs();
+      }
+    };
+
+    // Manejar la selección de archivos para la subida manual
+    const handleFileUpload = (event) => {
+      selectedFile.value = event.target.files[0];
+      uploadSuccess.value = false;
+      uploadNoContent.value = false;
+      uploadError.value = null;
+      uploadProgress.value = 0;
+    };
+
+    // Ir a una página específica
+    const goToPage = () => {
+      if (goToPageInput.value !== null && goToPageInput.value >= 1 && goToPageInput.value <= totalPages.value) {
+        currentPage.value = goToPageInput.value;
+        fetchLogs();
+        goToPageInput.value = null;
+      } else if (goToPageInput.value !== null) {
+        alert(`Por favor, ingresa un número de página entre 1 y ${totalPages.value}.`); // Reemplazar con toast
+        goToPageInput.value = null;
+      }
+    };
+
+    // Maneja el checkbox de "seleccionar todos"
+    const seleccionarTodos = (event) => {
+      if (event.target.checked) {
+        logsSeleccionados.value = logs.value.map(log => log.id);
+      } else {
+        logsSeleccionados.value = [];
+      }
+    };
+
+    // Método para borrar logs seleccionados
+    const borrarLogsSeleccionados = async () => {
+      if (logsSeleccionados.value.length === 0) {
+        alert("Por favor, selecciona al menos un log para borrar."); // Reemplazar con toast
         return;
       }
 
-      this.uploading = true;
-      this.uploadProgress = 0;
-      this.uploadSuccess = false;
-      this.uploadNoContent = false;
-      this.uploadError = null;
+      if (confirm('¿Estás seguro de que quieres borrar los logs seleccionados?')) { // Reemplazar con modal de confirmación
+        try {
+          await Promise.all(
+              logsSeleccionados.value.map(id => api.delete(`/logs/${id}`)) // Asumo /logs/{id}
+
+          );
+          await fetchLogs();
+          logsSeleccionados.value = [];
+          alert('Logs seleccionados borrados exitosamente.'); // Reemplazar con toast
+        } catch (e) {
+          error.value = e;
+          console.error("Error al borrar logs:", e);
+          alert('Error al borrar logs. Consulta la consola para más detalles.'); // Reemplazar con toast
+        }
+      }
+    };
+
+    // Método de subida de archivos
+    const uploadFile = async () => {
+      if (!selectedFile.value) {
+        alert('Por favor, selecciona un archivo CSV.'); // Reemplazar con toast
+        return;
+      }
+
+      uploading.value = true;
+      uploadProgress.value = 0;
+      processingMessage.value = 'Procesando archivo…';
+      uploadSuccess.value = false;
+      uploadNoContent.value = false;
+      uploadError.value = null;
 
       const formData = new FormData();
-      formData.append('file', this.selectedFile);
+      formData.append('file', selectedFile.value);
 
       try {
         const token = sessionStorage.getItem('accessToken');
-        if (!token) throw new Error('Token no encontrado, debe iniciar sesión de nuevo');
+        if (!token) {
+          throw new Error('Token no encontrado, debe iniciar sesión de nuevo');
+        }
         const config = {
           headers: {
             'Content-Type': 'multipart/form-data',
             Authorization: `Bearer ${token}`,
           },
           onUploadProgress: (progressEvent) => {
-            this.uploadProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            uploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total);
           },
         };
 
         const response = await api.post('/MacAddressProvider/parser', formData, config);
-        if (response.status === 200) {
-          this.uploadSuccess = true;
-        } else if (response.status === 204) {
-          this.uploadNoContent = true;
+
+        if (response.status === 204) {
+          uploadNoContent.value = true;
+          return;
         }
-      } catch (error) {
-        this.uploadError = error.message || 'Error desconocido al subir el archivo.';
-        console.error('Error al subir el archivo CSV:', error);
+
+        if (response.status === 200 && response.data) {
+          uploadSuccess.value = true;
+
+          if (response.data.unregisteredMacs && response.data.unregisteredMacs.length > 0) {
+            const macList = response.data.unregisteredMacs.join('\n');
+            alert(`⚠️ Se detectaron MACs no registradas:\n\n${macList}`); // Reemplazar con toast
+          }
+
+          alert(response.data.message || 'Archivo procesado correctamente.'); // Reemplazar con toast
+        }
+      } catch (err) { // Cambiado 'error' a 'err' para evitar conflicto con la variable reactiva 'error'
+        uploadError.value = err.message || 'Error desconocido al subir el archivo.';
+        console.error('Error al subir el archivo CSV:', err);
+        // Reemplazar con toast
       } finally {
-        this.uploading = false;
-        this.$router.go(0);
+        uploading.value = false;
+
+        await fetchLogs();
+        selectedFile.value = null;
+
+        const fileInput = document.querySelector('input[type="file"]');
+        if (fileInput) {
+          fileInput.value = '';
+        }
       }
+    };
+
+      // --- LIFECYCLE HOOKS (antes en `mounted`) ---
+      onMounted(() => {
+        fetchLogs();
+      });
+
+      // --- WATCHERS (antes en `watch`) ---
+      watch([searchMac, searchSede, mostrarSoloNoCoincidentes, perPage], onFilterChange);
+
+      // --- RETORNO DE PROPIEDADES Y MÉTODOS PARA EL TEMPLATE ---
+      return {
+        // Estados
+        logs, loading, error, currentPage, perPage,
+        searchMac, searchSede, selectedFile, uploading, uploadProgress,
+        uploadSuccess, uploadNoContent, uploadError, goToPageInput,
+        mostrarSoloNoCoincidentes, totalPages, logsSeleccionados,processingMessage,
+
+        // Computed
+        todosSeleccionados,
+
+        // Métodos
+        goToGuardarDispositivo, fetchLogs, onFilterChange,
+        prevPage, nextPage, handleFileUpload, goToPage,
+        seleccionarTodos, borrarLogsSeleccionados, uploadFile,
+      };
     },
-  },
-};
+  };
+
+
 </script>
 
 <style scoped>
@@ -251,6 +359,7 @@ h1 {
 .actions {
   margin-bottom: 20px;
 }
+
 .actions span {
   margin: 0 10px; /* Añade margen izquierdo y derecho */
 }
@@ -265,12 +374,15 @@ h1 {
   background-color: #f0f0f0;
   transition: background-color 0.3s ease;
 }
+
 .actions button:hover {
   background-color: #e0e0e0;
 }
-.actions label{
+
+.actions label {
   margin: 5px;
 }
+
 .dispositivo-item button {
   padding: 8px 12px;
   font-size: 0.9em;
@@ -290,6 +402,7 @@ h1 {
 .actions button:hover {
   background-color: #e0e0e0;
 }
+
 .search-filters button:hover {
   background-color: #e0e0e0;
 }
@@ -308,7 +421,8 @@ h1 {
   border: 1px solid #ccc;
   border-radius: 5px;
 }
-.search-filters button{
+
+.search-filters button {
   padding: 8px 12px;
   font-size: 0.9em;
   cursor: pointer;
@@ -367,6 +481,7 @@ th {
 tbody tr:nth-child(even) {
   background-color: #f9f9f9;
 }
+
 .search-filters input[type="text"] {
   padding: 10px 15px; /* Emparejar el padding de los botones */
   font-size: 1em;
@@ -374,6 +489,7 @@ tbody tr:nth-child(even) {
   border: 1px solid #ccc;
   border-radius: 5px;
 }
+
 .search-filters input[type="checkbox"] {
   width: 1.2em; /* Ajustar el ancho del checkbox */
   height: 1.2em; /* Ajustar la altura del checkbox */

@@ -9,11 +9,12 @@ export default {
       nuevoDispositivo: {
         macAddress: this.$route.query.mac|| '',
         sede:this.$route.query.sede|| '',
+        id: this.$route.query.id || '',
         fabricante: '',
         modelo: '',
         propietario: '',
         tipoDispositivo: '',
-        ips: [],
+        ips: [{ ipAddress: '' }],
         tamanyo: null,
         velocidad: null,
         banda: null,
@@ -25,23 +26,66 @@ export default {
         puertos:null
       },
       error: null,
+      logIdOrigen: this.$route.query.logId || null, // Guarda el ID del log si viene de la URL
+      borrarLogOrigen: false,
     };
+  },
+  created() {
+    if (this.$route.query.ip) {
+      if (this.nuevoDispositivo.ips.length === 0) {
+        this.nuevoDispositivo.ips.push({ ipAddress: this.$route.query.ip });
+      } else {
+        // Si ya hay IPs (ej. el usuario añadió una), sobrescribimos la primera
+        // o puedes decidir no hacer nada si ya hay una.
+        this.nuevoDispositivo.ips[0].ipAddress = this.$route.query.ip;
+      }
+    }
   },
 
   methods: {
+    async borrarLog(id) {
+      if (!id) {
+        console.error("No se puede borrar el log: ID es nulo."); // Usando console.error en vez de alert
+        return false; // Indica fallo
+      }
+      try {
+        const token = sessionStorage.getItem('accessToken')
+        if (!token) throw new Error('Token no encontrado, debe iniciar sesión de nuevo');
+        const config = {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        };
+        await api.delete(`/logs/${id}`, config);
+        console.log(`Log ${id} borrado exitosamente.`); // Usando console.log en vez de alert
+        return true; // Indica éxito
+      } catch (e) {
+        console.error(`Error al borrar log ${id}:`, e);
+        // Aquí podrías usar un toast.error para el usuario
+        return false; // Indica fallo
+      }
+    },
 
 
     async crearDispositivo() {
       this.error=null;
+      if (!this.nuevoDispositivo.tipoDispositivo) {
+        // Muéstralo en la UI en lugar de un alert forzado
+        this.error = 'Debes seleccionar un tipo de dispositivo';
+        return;
+      }
       try {
         const token = sessionStorage.getItem('accessToken')
         if (!token) throw new Error('Token no encontrado, debe iniciar sesión de nuevo');
-        const config ={
-          headers: {Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'}
+        const config = {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         };
 
-        const tipo = this.nuevoDispositivo.tipoDispositivo.toLowerCase();
+        const tipo = this.nuevoDispositivo.tipoDispositivo ? this.nuevoDispositivo.tipoDispositivo.toLowerCase() : '';
         let url;
         switch (tipo) {
           case 'pc':
@@ -68,7 +112,14 @@ export default {
 
         console.log('Payload a enviar:', JSON.stringify(this.nuevoDispositivo, null, 2));
         await api.post(url, this.nuevoDispositivo, config);
-        alert('Dispositivo creado correctamente');
+        console.log('Dispositivo creado correctamente');
+        if (this.borrarLogOrigen && this.logIdOrigen) {
+          const logBorrado = await this.borrarLog(this.logIdOrigen);
+          if (logBorrado) {
+            console.log('Log de origen también borrado.');
+          }
+        }
+
         await router.push('/dispositivos');
       } catch (e) {
         const status = e.response.status;
@@ -139,6 +190,7 @@ export default {
             <option>Tablet</option>
           </select>
         </label>
+        <p v-if="error" class="error">{{ error }}</p>
 
         <!-- Campos específicos según tipo -->
         <div v-if="nuevoDispositivo.tipoDispositivo === 'Pc'">
@@ -202,6 +254,10 @@ export default {
             <input type="number" v-model="nuevoDispositivo.tamanyo"/>
           </label>
         </div>
+        <div v-if="logIdOrigen">
+          <input type="checkbox" id="borrarLog" v-model="borrarLogOrigen">
+          <label for="borrarLog">Borrar Log de Origen al Guardar</label>
+        </div>
 
         <button type="submit">Guardar</button>
         <p v-if="error" class="text-red-500 mt-4">Error: {{ error.message }}</p>
@@ -210,7 +266,7 @@ export default {
         <label>IPs:</label>
         <div
             v-for="(ipObj, idx) in nuevoDispositivo.ips"
-            :key="ipObj.id || idx"
+            :key="idx"
             class="ip-row">
 
           <input
@@ -258,5 +314,9 @@ form button{
 }
 form button:hover {
   background-color: #ccc;
+}
+.error{
+
+  color: red;
 }
 </style>
