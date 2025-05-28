@@ -25,6 +25,7 @@
     </div>
     <div class ="actions">
       <button @click="borrarLogsSeleccionados">Borrar Seleccionados</button>
+      <button @click ="deleteLogsUpdated">Eliminar Logs actualizados</button>
     </div>
     <table class="mi-tabla" v-if="logs && logs.length">
       <thead>
@@ -123,13 +124,97 @@ export default {
     const mostrarSoloNoCoincidentes = ref(false);
     const totalPages = ref(1);
     const logsSeleccionados = ref([]);
-    const processingMessage= ref('');
+    const processingMessage = ref('');
+
+    const mostrarNotificacion = (mac) => {
+      if (Notification.permission === "granted") {
+        new Notification("⚠️ MAC no registrada detectada", {
+          body: `Se detectó: ${mac}`,
+          icon: "/warning-icon.png", // opcional, usa un icono válido en tu proyecto
+        });
+      }
+    };
+
+    function showGroupedNotification(macList) {
+      if (!("Notification" in window)) {
+        console.warn("Este navegador no soporta notificaciones de escritorio.");
+        return;
+      }
+
+      if (Notification.permission === "granted") {
+        // Si el permiso está concedido, crea y muestra la notificación
+        const title = "MACs no registradas detectadas";
+        const body = `Se han detectado ${macList.length} MACs nuevas.\nHaz clic para revisarlas.`;
+        const options = {
+          body: body,
+          icon: "/logo.png", // Asegúrate de que esta ruta sea accesible públicamente
+          tag: "mac-alert", // TAG para agrupar notificaciones y evitar duplicadas
+          renotify: false,  // No volver a notificar si ya hay una activa con este tag
+        };
+
+        const notification = new Notification(title, options);
+
+        // 3. ¡Aquí está la clave! Asignar el manejador de eventos onclick
+        notification.onclick = function () {
+          console.log("Notificación clickeada. Enfocando la ventana.");
+          // Lógica para lo que debe suceder cuando el usuario hace clic en la notificación.
+
+          router.push('/logs');
+
+          // Cierra la notificación después de que el usuario haga clic en ella
+          this.close();
+        };
+      } else if (Notification.permission !== "denied") {
+        // Si el permiso no ha sido denegado, solicita el permiso al usuario.
+        // Es buena práctica solicitar el permiso en respuesta a una interacción del usuario
+        // o al cargar la aplicación si es esencial.
+        Notification.requestPermission().then(permission => {
+          if (permission === "granted") {
+            console.log("Permiso de notificación otorgado. Intenta mostrar la notificación de nuevo.");
+            // Si el permiso se otorga ahora, puedes intentar mostrar la notificación de nuevo
+            showGroupedNotification(macList);
+          } else {
+            console.warn("Permiso de notificación denegado por el usuario.");
+          }
+        });
+      } else {
+        console.warn("El usuario ha denegado previamente los permisos de notificación.");
+      }
+    }
+
 
 
     const todosSeleccionados = computed(() => {
       // Si no hay logs, o si todos los logs están seleccionados
       return logs.value.length > 0 && logsSeleccionados.value.length === logs.value.length;
     });
+
+    const deleteLogsUpdated = async () => {
+      try {
+        const token = sessionStorage.getItem('accessToken');
+        if (!token) {
+          throw new Error('Token no encontrado, debe iniciar sesión de nuevo');
+        }
+        const config = {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            Authorization: `Bearer ${token}`,
+          },
+        };
+
+      const response = await api.delete('/logs/updated',config)
+
+        if (response.status === 200 || response.status === 204) {
+          alert('Logs actualizados eliminados correctamente.'); // Reemplaza con toast si lo deseas
+          await fetchLogs(); // Recargar los logs
+        } else {
+          alert('No se eliminaron logs actualizados.'); // También puede ser un toast
+        }
+      } catch (err) {
+        console.error('Error al eliminar logs actualizados:', err);
+        alert('Error al eliminar logs actualizados.'); // Reemplazar con toast
+      }
+    };
 
     const goToGuardarDispositivo = (log) => {
       router.push({
@@ -290,12 +375,17 @@ export default {
           uploadSuccess.value = true;
 
           if (response.data.unregisteredMacs && response.data.unregisteredMacs.length > 0) {
-            const macList = response.data.unregisteredMacs.join('\n');
-            alert(`⚠️ Se detectaron MACs no registradas:\n\n${macList}`); // Reemplazar con toast
+            const macList = response.data.unregisteredMacs;
+            const listaTexto = macList.join('\n');
+            alert(`⚠️ Se detectaron MACs no registradas:\n\n${listaTexto}`); // Reemplazar con toast
+
+            showGroupedNotification(macList);
           }
 
-          alert(response.data.message || 'Archivo procesado correctamente.'); // Reemplazar con toast
         }
+
+          alert(response.data.message || 'Archivo procesado correctamente.'); // Reemplazar con toast
+
       } catch (err) { // Cambiado 'error' a 'err' para evitar conflicto con la variable reactiva 'error'
         uploadError.value = err.message || 'Error desconocido al subir el archivo.';
         console.error('Error al subir el archivo CSV:', err);
@@ -316,6 +406,12 @@ export default {
       // --- LIFECYCLE HOOKS (antes en `mounted`) ---
       onMounted(() => {
         fetchLogs();
+
+        if (Notification.permission !== "granted") {
+          Notification.requestPermission().then(permission => {
+            console.log("Permiso de notificaciones:", permission);
+          });
+        }
       });
 
       // --- WATCHERS (antes en `watch`) ---
@@ -333,7 +429,7 @@ export default {
         todosSeleccionados,
 
         // Métodos
-        goToGuardarDispositivo, fetchLogs, onFilterChange,
+        goToGuardarDispositivo, deleteLogsUpdated, fetchLogs, onFilterChange,
         prevPage, nextPage, handleFileUpload, goToPage,
         seleccionarTodos, borrarLogsSeleccionados, uploadFile,
       };
